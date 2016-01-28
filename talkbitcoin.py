@@ -1,73 +1,75 @@
+import code
 import socket
-import threading
-import Queue
-from bitcoin.net import PROTO_VERSION
-from bitcoin.messages import MsgSerializable
+
+import bitcoin
+from bitcoin.messages import *
+from bitcoin.net import *
+from _talkbitcoin import PeerConn, MsgList
+
+peer = None
 
 
-class PeerConnection(threading.Thread):
+def connect(host="localhost", port=bitcoin.params.DEFAULT_PORT,
+            sendversion=True):
+    global peer
+    if peer is not None:
+        if not peer.is_alive():
+            peer = None
+        else:
+            print("Already connected to a peer. Call disconnect() first.")
+            return
+    conn = socket.create_connection((host, port))
+    peer = PeerConn(conn)
+    peer.start()
+    print("Connected to {}.".format(peer.peername))
 
-    def __init__(self, conn, protover=PROTO_VERSION):
-        """Pass in an established connection."""
-        self.conn = conn
-        self.peername = conn.getpeername()
-        self.protover = protover
-        self.recvq = Queue.Queue()
-        self.sendq = Queue.Queue()
-        self._stopflag = threading.Event()
-        super(PeerConnection, self).__init__()
+    if sendversion:
+        send(msg_version())
+        print("Version message sent.")
 
-    def run(self):
-        sendhandler = threading.Thread(target=self._handle_send)
-        recvhandler = threading.Thread(target=self._handle_recv)
-        sendhandler.start()
-        recvhandler.start()
-        recvhandler.join()
-        self.stop()
-        sendhandler.join()
 
-    def send(self, msg):
+def disconnect():
+    global peer
+    if peer is not None:
+        peer.stop()
+        peer.join()
+        print("Disconnected from {}.".format(peer.peername))
+    else:
+        peer = None
+
+
+def send(msg):
+    global peer
+    if peer is None or not peer.is_alive():
+        status()
+    else:
+        peer.send(msg)
+
+
+def recv():
+    """Receive all buffered messages."""
+    msgs = MsgList()
+    while True:
+        msg = peer.recv()
         if msg is None:
-            # Disallow, because None msg is a signal to stop.
-            # Use self.stop to close the connection.
-            raise ValueError("Msg must not be None.")
-        self.sendq.put(msg)
+            break
+        msgs.append(msg)
+    return msgs
 
-    def recv(self):
-        try:
-            return self.recvq.get(block=False)
-        except Queue.Empty:
-            return None
 
-    def _handle_send(self):
-        while True:
-            msg = self.sendq.get()
-            if msg is None:
-                break
-            try:
-                msg.stream_serialize(self.conn.makefile(mode='w'))
-            except Exception as e:
-                print("Msg send error: {}".format(e))
+def status():
+    global peer
+    if peer is None or not peer.is_alive():
+        print("Not connected.")
+        peer = None
+    else:
+        print("Connected to {}: {} messages in receive buffer.".
+              format(peer.peername, peer.recvq.qsize()))
 
-    def _handle_recv(self):
-        while True:
-            try:
-                msg = MsgSerializable.stream_deserialize(
-                    self.conn.makefile(mode='r'),
-                    protover=self.protover)
-            except Exception as e:
-                msg = e
-                if not self._stopflag.is_set():
-                    print("Peer connection closed unexpectedly.")
-                break
-            finally:
-                self.recvq.put(msg)
+st = status  # Alias
 
-    def stop(self):
-        self._stopflag.set()
-        self.sendq.put(None)
-        try:
-            self.conn.shutdown(socket.SHUT_RDWR)
-        except:
-            pass
-        self.conn.close()
+
+if __name__ == "__main__":
+    st = status
+    code.interact(local=locals())
+    disconnect()
