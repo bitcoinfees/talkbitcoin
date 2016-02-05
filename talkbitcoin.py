@@ -34,7 +34,6 @@ def disconnect():
         peer.stop()
         peer.join()
         print("Disconnected from {}.".format(peer.peername))
-    else:
         peer = None
 
 
