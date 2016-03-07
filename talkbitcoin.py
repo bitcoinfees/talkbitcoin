@@ -7,6 +7,7 @@ from bitcoin.net import *
 from _talkbitcoin import PeerConn, MsgList
 
 peer = None
+sent = MsgList()
 
 
 def connect(host="localhost", port=bitcoin.params.DEFAULT_PORT,
@@ -42,6 +43,7 @@ def send(msg):
     if peer is None or not peer.is_alive():
         status()
     else:
+        sent.append(msg)
         peer.send(msg)
 
 
